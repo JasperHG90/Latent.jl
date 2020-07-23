@@ -1,5 +1,5 @@
 module Latent
 
-greet() = print("Hello World!")
+include("GMM.jl")
 
 end # module
