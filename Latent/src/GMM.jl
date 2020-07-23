@@ -266,7 +266,7 @@ end;
 Training loop for GMM using EM algorithm
 =#
 
-function GMM(X::Array{Float64}, K::Int64, ϵ::Float64=1e-3, maxiter::Int64=100, epochs::Int64=10)::Tuple{Array{Float64}, Array{Float64}, Array{Float64}, Float64, Array{Float64}}
+function train_GMM(X::Array{Float64}, K::Int64, ϵ::Float64=1e-3, maxiter::Int64=100, epochs::Int64=10)::Tuple{Array{Float64}, Array{Float64}, Array{Float64}, Float64, Array{Float64}}
     #=
     Implement the training loop for the GMM using EM
     :param X: matrix of dimensions (n x m) that contains the input data
@@ -307,14 +307,14 @@ function GMM(X::Array{Float64}, K::Int64, ϵ::Float64=1e-3, maxiter::Int64=100, 
             @debug "Started iteration $iter on epoch $epoch ..."
             # Perform E-step 
             try
-                Γ = EM.E_step(X, π, μ, Σ)
+                Γ = E_step(X, π, μ, Σ)
             catch e
                 @error "Encountered $e error while computing E-step ..."
                 break
             end;
             @debug "Finished E-step ..."
             # Perform M-step 
-            π, μ, Σ = EM.M_step(X, Γ)
+            π, μ, Σ = M_step(X, Γ)
             @debug "Finished M-step ..."
             # Compute loss 
             try
@@ -389,9 +389,9 @@ function clust(X::Array{Float64}, K::Int64; ϵ::Float64=1e-3, maxiter::Int64=100
     # Record dimensions
     N, M = size(X)
     # Run algorithm
-    π1, μ1, Σ1, L1, history = GMM(X, K, ϵ, maxiter, epochs)
+    π1, μ1, Σ1, L1, history = train_GMM(X, K, ϵ, maxiter, epochs)
     # Compute labels using best values 
-    lbls = [i for i in mapslices(argmax, EM.E_step(X, π1, μ1, Σ1), dims=2)[:]]
+    lbls = [i for i in mapslices(argmax, E_step(X, π1, μ1, Σ1), dims=2)[:]]
     # Return history and labels
     return lbls, history
 end;
@@ -430,7 +430,7 @@ An array of dimensions (∑N x M) containing the data points.
 julia>
 ```
 """
-function simulate_gmm(K::Int64, N::Array{Int64}, μ::Array{Float64}, Σ::Array{Float64})::Tuple{Array{Float64}, Array{Float64}}
+function simulate_GMM(K::Int64, N::Array{Int64}, μ::Array{Float64}, Σ::Array{Float64})::Tuple{Array{Float64}, Array{Float64}}
     # Assert dimensions 
     @assert K == size(Σ)[3] "You must pass a covariance matrix for each separate cluster ..."
     @assert K == size(μ)[1] "You must pass a mean array for each separate cluster ..."
