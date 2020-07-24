@@ -2,11 +2,10 @@ module HMM
 
 #= 
 Implementation of a Hidden Markov Model (HMM) with a Gaussian emission distribution
+TODO: forward // backward probabilities -- use log s.t. multiplication does not become excessively small
 =#
 
 using Random, Plots, Logging, LinearAlgebra, ProgressMeter, Distributions
-
-Random.seed!(425234);
 
 """
     simulate_HMM(M::Int64, T::Int64, Γ::Array{Float64}, δ::Array{Float64}, μ::Array{Float64}, σ::Array{Float64})::Tuple{Array{Float64}, Array{Float64}}
@@ -60,6 +59,7 @@ function simulate_HMM(M::Int64, T::Int64, Γ::Array{Float64}, δ::Array{Float64}
     return X, Z
 end;
 
+Random.seed!(425234);
 M = 2
 T = 100
 Γ = [0.2 0.8 ; 0.4 0.6]
@@ -67,9 +67,19 @@ T = 100
 μ = [1.0 ; 8.0]
 σ = [1.3 ; 2.0]
 
-X, Z = simulate_HMM(M, T, Γ, δ, μ, σ)
+X, Z = simulate_HMM(M, T, Γ, δ, μ, σ);
 # X is bimodal
 histogram(X, bins=15)
+
+Ψ = zeros((T, M));
+Ψ[:,1] = Normal(μ[1], σ[1]) |>
+    x -> pdf.(x, X)
+
+Ψ[:,2] = Normal(μ[2], σ[2]) |>
+    x -> pdf.(x, X)
+
+# Normalize 
+Ψ ./= sum(Ψ, dims=2)
 
 # Forward algorithm
 function forward_algorithm(X::Array{Float64}, Γ::Array{Float64}, Ψ::Array{Float64}, δ::Array{Float64})::Array{Float64}
@@ -92,11 +102,11 @@ function forward_algorithm(X::Array{Float64}, Γ::Array{Float64}, Ψ::Array{Floa
     M = size(Γ)[1]
     Α = zeros((T, M))
     # Populate first alpha (initial distribution)
-    Α[1, :] = δ .* Ψ[:, 0]
+    Α[1, :] = δ .* Ψ[1, :]
     # For each step in 2 : T, populate alpha 
     for t ∈ 2:T
         for m ∈ 1:M
-            Α[t, m] = Α[t-1, :] * Γ[:, m] .* Ψ[m, t]
+            Α[t, m] = Α[t-1, :]' * Γ[m, :] .* Ψ[t, m]
         end;
     end;
     # return
@@ -117,16 +127,20 @@ function backward_algorithm(X::Array{Float64}, Γ::Array{Float64}, Ψ::Array{Flo
     M = size(Γ)[1]
     Β = zeros((T, M))
     # Set B_T to 1
-    Β[T,:] = 1.
+    Β[T,:] = [1. 1.]
     # Loop from T-1 to 1
-    for t ∈ (T-1):1
-        for m ∈ M
-            Β[t, m] = (Β[t+1, :] .* Ψ[m, t+1]) * Γ[m,:]
+    for t ∈ reverse(1:(T-1))
+        for m ∈ 1:M
+            Β[t, m] = (Β[t+1, :] .* Ψ[t+1, m])' * Γ[m,:]
         end;
     end;
     # Return 
     return Β
 end;
+
+forward_algorithm(X, Γ, Ψ, δ)
+backward_algorithm(X, Γ, Ψ, δ)
+
 
 ### End module
 end;
