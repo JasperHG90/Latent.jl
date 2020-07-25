@@ -138,6 +138,21 @@ function backward_algorithm(X::Array{Float64}, Γ::Array{Float64}, Ψ::Array{Flo
     return Β
 end;
 
+# Viterbi algorithm
+function viterbi_algorithm(X::Array{Float64}, Γ::Array{Float64}, Ψ::Array{Float64}, δ::Array{Float64})::Array{Int64}
+    #=
+    Compute the maximizing latent state sequence
+    =#
+    # Dimensions 
+    T, _ = size(X)
+    M, _ = size(Γ)
+    # State sequences
+    states = zeros(Int64,(T, M))
+    # First time step 
+    
+    # Loop through time steps 
+end;
+
 forward_algorithm(X, Γ, Ψ, δ)
 backward_algorithm(X, Γ, Ψ, δ)
 

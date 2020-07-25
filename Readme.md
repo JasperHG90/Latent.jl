@@ -66,3 +66,6 @@ Latent.GMM.plot_history(history)
 
 <img src="img/history.png" width=500></img>
 
+We can also plot the clusters:
+
+<img src="img/estimated.png" width=500></img>
