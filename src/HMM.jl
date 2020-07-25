@@ -6,6 +6,8 @@ TODO: forward // backward probabilities -- use log s.t. multiplication does not 
 =#
 
 using Random, Plots, Logging, LinearAlgebra, ProgressMeter, Distributions
+using Logging;
+logger = global_logger(SimpleLogger(stdout, Logging.Debug)) # Change to Logging.Debug for detailed info
 
 """
     simulate_HMM(M::Int64, T::Int64, Γ::Array{Float64}, δ::Array{Float64}, μ::Array{Float64}, σ::Array{Float64})::Tuple{Array{Float64}, Array{Float64}}
@@ -28,7 +30,7 @@ An array of dimensions (∑N x M) containing the data points.
 julia>
 ```
 """
-function simulate_HMM(M::Int64, T::Int64, Γ::Array{Float64}, δ::Array{Float64}, μ::Array{Float64}, σ::Array{Float64})::Tuple{Array{Float64}, Array{Float64}}
+function simulate_HMM(M::Int64, T::Int64, Γ::Array{Float64}, δ::Array{Float64}, μ::Array{Float64}, σ::Array{Float64})::Tuple{Array{Float64}, Array{Int64}}
     # Assert dimensions 
     @assert M == size(σ)[1] "Number of variances not equal to the number of latent states ..."
     @assert M == size(μ)[1] "Number of means not equal to the number of latent states ..."
@@ -60,26 +62,34 @@ function simulate_HMM(M::Int64, T::Int64, Γ::Array{Float64}, δ::Array{Float64}
 end;
 
 Random.seed!(425234);
-M = 2
-T = 100
-Γ = [0.2 0.8 ; 0.4 0.6]
-δ = [0.5 ; 0.5]
-μ = [1.0 ; 8.0]
-σ = [1.3 ; 2.0]
+M = 3
+T = 500
+Γ = [0.2 0.3 0.5 ; 0.3 0.3 0.4; 0.8 0.1 0.1]
+δ = [(1/3) ; (1/3); (1/3)]
+μ = [1.0 ; 6.0 ; -5.0]
+σ = [1.3 ; 0.8; 0.9]
 
 X, Z = simulate_HMM(M, T, Γ, δ, μ, σ);
 # X is bimodal
-histogram(X, bins=15)
+histogram(X, bins=20)
 
-Ψ = zeros((T, M));
-Ψ[:,1] = Normal(μ[1], σ[1]) |>
-    x -> pdf.(x, X)
-
-Ψ[:,2] = Normal(μ[2], σ[2]) |>
-    x -> pdf.(x, X)
-
-# Normalize 
-Ψ ./= sum(Ψ, dims=2)
+# Utility function to retrieve the normalized probability density of X given parameters on Z
+function normalized_pdf(X::Array{Float64}, μ::Array{Float64}, σ::Array{Float64})::Array{Float64}
+    # Get dimensions 
+    T = size(X)[1]
+    M = size(μ)[1]
+    # Results matrix 
+    Ψ = zeros((T, M));
+    # Compute the likelihood of X given parameters on Z
+    for m ∈ 1:M
+        Ψ[:,m] = Normal(μ[m], σ[m]) |>
+            dist -> pdf.(dist, X)
+    end;
+    # Normalize across rows s.t. each row sums to unity 
+    Ψ ./= sum(Ψ, dims=2)
+    # Return psi 
+    return Ψ
+end;
 
 # Forward algorithm
 function forward_algorithm(X::Array{Float64}, Γ::Array{Float64}, Ψ::Array{Float64}, δ::Array{Float64})::Array{Float64}
@@ -127,7 +137,7 @@ function backward_algorithm(X::Array{Float64}, Γ::Array{Float64}, Ψ::Array{Flo
     M = size(Γ)[1]
     Β = zeros((T, M))
     # Set B_T to 1
-    Β[T,:] = [1. 1.]
+    Β[T,:] = ones((1, M))
     # Loop from T-1 to 1
     for t ∈ reverse(1:(T-1))
         for m ∈ 1:M
@@ -138,24 +148,82 @@ function backward_algorithm(X::Array{Float64}, Γ::Array{Float64}, Ψ::Array{Flo
     return Β
 end;
 
+# Utility function that computes log-likelihood given x, mu, sigma and transition probability
+function log_likelihood(ψ::Float64, γ::Float64)::Float64
+    #= 
+    Compute the log-likelihood of X given the parameters 
+    =#
+    return log(ψ) + log(γ)
+end;
+
 # Viterbi algorithm
-function viterbi_algorithm(X::Array{Float64}, Γ::Array{Float64}, Ψ::Array{Float64}, δ::Array{Float64})::Array{Int64}
+function viterbi_algorithm(Ψ::Array{Float64}, Γ::Array{Float64}, δ::Array{Float64})::Tuple{Array{Int64}, Float64}
     #=
     Compute the maximizing latent state sequence
     =#
     # Dimensions 
-    T, _ = size(X)
-    M, _ = size(Γ)
+    T = size(Ψ)[1]
+    M = size(Γ)[1]
     # State sequences
-    states = zeros(Int64,(T, M))
+    sequences = zeros(Int64, (T-1, M))
+    # Viterbi probabilities 
+    Ω = zeros((T, M))
     # First time step 
-    
+    Ω[1,:] = [log_likelihood(Ψ[1,m], δ[m]) for m ∈ 1:M]
+    @debug "Forward pass (computing set of likely sequences) ...)"
     # Loop through time steps 
+    for t ∈ 2:T
+        @debug "Computing sequences at time step $t ..."
+        # For each state, conditioning on the last state, do ...
+        for m ∈ 1:M
+            # Compute for each state the probability of ending up at state m ...
+            prob = zeros((M))
+            for j ∈ 1:M
+                prob[j] = Ω[t-1, j] + log_likelihood(Ψ[t, m], Γ[j, m])
+            end;
+            # Get argmax
+            sequences[t-1, m] = argmax(prob)
+            Ω[t, m] = prob[sequences[t-1,m]]
+        end;
+    end;
+    @debug "Finished forward pass ..."
+    states = zeros(Int64, (T))
+    states[T] = argmax(Ω[T, :])
+    LL = Ω[T, states[T]]
+    # Backward pass 
+    for t ∈ reverse(1:(T-1))
+        states[t] = sequences[t, states[t+1]]
+        LL += Ω[t, states[t]]
+    end;
+    # Return the state sequence, log-likelihood 
+    return states, LL
 end;
+
+Ψ = normalized_pdf(X, μ, σ)
 
 forward_algorithm(X, Γ, Ψ, δ)
 backward_algorithm(X, Γ, Ψ, δ)
 
+states = viterbi_algorithm(Ψ, Γ, δ);
+# Not all states correct
+sum(states .== Z)
+# Which ones?
+findall(x->x==1, states .!= Z)
+
+# Value of wrong state
+idx = 123
+# Value of observed 
+X[idx]
+# Value of latent 
+Z[idx]
+# Value of predicted latent 
+states[idx]
+# Value of probabilities for each state
+Ψ[idx, :]
+# Transition probability given previous state 
+states[idx-1]
+Γ[states[idx-1], :]
+Γ[states[idx-1], states[idx]]
 
 ### End module
 end;
