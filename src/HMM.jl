@@ -8,8 +8,6 @@ Code in part adapted from:
     Zucchini, W., MacDonald, I. L., & Langrock, R. (2017). Hidden Markov models for 
     time series: an introduction using R. CRC press.
 
-TODO: forward // backward probabilities -- use log s.t. multiplication does not become excessively small
-TODO: simulating data --> ensure that are using the right definitions (i.e. gamma is homogeneous)
 TODO: add multinomial distribution 
 TODO: add forecasting function (p.246)
 =#
@@ -344,6 +342,44 @@ histogram(X, bins=15)
 
 # Accuracy
 sum(Z .== S) / length(Z)
+
+# Forecasting 
+# (1) obtain forward probabilities 
+Ψ = normalized_pdf(X, θ[2:3]...) # ... is splat operator 
+# Compute the initial distribution 
+δ = (Matrix(I, M, M) .- θ[1] .+ 1) \ ones(M)
+α = δ .* Ψ[1,:]
+κ = sum(α)
+α /= κ
+for t ∈ 1:T
+    ω = (α' * θ[1])' .* Ψ[t,:]
+    α[:] = ω / sum(ω)
+end;
+# Make xrange based on means and variances
+support_low = Normal(min(θ[2]..., min(θ[3]...))) |>
+    x -> quantile(x, 0.001)
+support_high = Normal(max(θ[2]..., max(θ[3]...))) |>
+    x -> quantile(x, 0.999)
+# Make sequence 
+support = [i for i ∈ support_low:0.1:support_high]
+ΨH = normalized_pdf(support, θ[2:3]...)
+# Horizon
+H = 20
+Φ = zeros((H, M))
+λ = α
+# For each time step in Horizon, compute forward prob 
+for h ∈ 1:H
+    Φ[h,:] = (λ' * θ[1])' .* ΨH[h,:]
+    λ[:] = Φ[h,:];
+end;
+Λ = normalized_pdf(support, θ[2:3]...)
+out = (Λ * )
+
+histogram(Λ * Φ[1,:], bins=15)
+
+Λ * Φ[1,:]
+
+Λ
 
 ### End module
 end;
