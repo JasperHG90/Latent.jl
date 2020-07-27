@@ -39,7 +39,7 @@ An array of dimensions (∑N x M) containing the data points.
 julia>
 ```
 """
-function simulate_HMM(M::Int64, T::Int64, Γ::Array{Float64}, δ::Array{Float64}, μ::Array{Float64}, σ::Array{Float64})::Tuple{Array{Float64}, Array{Int64}}
+function simulate(M::Int64, T::Int64, Γ::Array{Float64}, δ::Array{Float64}, μ::Array{Float64}, σ::Array{Float64})::Tuple{Array{Float64}, Array{Int64}}
     # Assert dimensions 
     @assert M == size(σ)[1] "Number of variances not equal to the number of latent states ..."
     @assert M == size(μ)[1] "Number of means not equal to the number of latent states ..."
@@ -310,6 +310,24 @@ function initialize_parameters(M::Int64, T::Int64)::Tuple{Array{Float64},Array{F
     return Γ, μ, σ
 end;
 
+# HMM function
+function fit(X::Array{Float64}, M::Int64; iterations=100, tol=1e-6)
+    #=
+    Fit a Gaussian Hidden Markov Model to a dataset
+    =#
+    # Get dimensions
+    T = size(X)[1]
+    # Initialize parameters 
+    Γ0, μ0, σ0 = initialize_parameters(M, T) 
+    # Fit HMM
+    Γ1, μ1, σ1, LL, AIC, BIC = baum_welch(Γ0, X, μ0, σ0; iterations=iterations, tol=tol)
+    # Predicted state sequence 
+    Ψ = normalized_pdf(X, μ1, σ1) # Likelihood given the best parameters
+    S = viterbi_algorithm(Γ1, Ψ)
+    # Return best parameters, fit statistics and the predicted sequences 
+    return (Γ1, μ1, σ1), (LL, AIC, BIC), S
+end;
+
 # Generate dataset
 Random.seed!(425234);
 M = 2
@@ -317,19 +335,12 @@ T = 500
 Γ = [0.8 0.2 ; 0.35 0.65]
 μ = [-2.0 ; 4.0]
 σ = [1.3 ; 0.8]
-X, Z = simulate_HMM(M, T, Γ, δ, μ, σ);
+X, Z = simulate(M, T, Γ, δ, μ, σ);
 # X is bimodal
 histogram(X, bins=15)
 
-# Make initial parameters 
-Γ0, μ0, σ0 = initialize_parameters(M, T)
-
-# Fit HMM
-Γ1, μ1, σ1, LL, AIC, BIC = baum_welch(Γ0, X, μ0, σ0; iterations=100, tol=1e-6)
-
-# Predicted state sequence 
-Ψ = normalized_pdf(X, μ, σ)
-S = viterbi_algorithm(Γ, Ψ)
+# Fit HMM 
+θ, stats, S = fit(X, 2);
 
 # Accuracy
 sum(Z .== S) / length(Z)
