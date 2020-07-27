@@ -70,24 +70,6 @@ function simulate_HMM(M::Int64, T::Int64, Γ::Array{Float64}, δ::Array{Float64}
     return X, Z
 end;
 
-Random.seed!(425234);
-M = 2
-T = 500
-Γ = [0.8 0.2 ; 0.35 0.65]
-δ = [(1/2) ; (1/2)]
-μ = [-1.0 ; 4.0]
-σ = [1.3 ; 0.8]
-
-#inv(Γ'Γ) * Γ' * ones((M))
-
-X, Z = simulate_HMM(M, T, Γ, δ, μ, σ);
-# X is bimodal
-histogram(X, bins=15)
-
-Ψ = normalized_pdf(X, μ, σ)
-a = forward_algorithm(Γ ,Ψ)
-b = backward_algorithm(Γ, Ψ)
-
 # Utility function to retrieve the normalized probability density of X given parameters on Z
 function normalized_pdf(X::Array{Float64}, μ::Array{Float64}, σ::Array{Float64})::Array{Float64}
     #=
@@ -98,6 +80,7 @@ function normalized_pdf(X::Array{Float64}, μ::Array{Float64}, σ::Array{Float64
     :return: Ψ, which is an array of size T x M, where Ψ[:,m] contains the likelihood of X 
              given the parameters of component distribution m 
     =#
+    @debug "Computing likelihood of X ..."
     # Get dimensions 
     T = size(X)[1]
     M = size(μ)[1]
@@ -111,6 +94,7 @@ function normalized_pdf(X::Array{Float64}, μ::Array{Float64}, σ::Array{Float64
     # Normalize across rows s.t. each row sums to unity 
     Ψ ./= sum(Ψ, dims=2)
     # Return psi 
+    @debug "Finished computing likelihood of X ..."
     return Ψ
 end;
 
@@ -131,6 +115,7 @@ function forward_algorithm(Γ::Array{Float64}, Ψ::Array{Float64})::Array{Float6
     :param δ: initial distribution matrix of size 1 x m
     :return: matrix Α ∈ R^{T x m} with logged probabilities computed in the forward step
     =#
+    @debug "Computing forward probabilities ..."
     # Shapes
     T = size(Ψ)[1] 
     M = size(Γ)[1]
@@ -159,6 +144,7 @@ function forward_algorithm(Γ::Array{Float64}, Ψ::Array{Float64})::Array{Float6
         α[t,:] = log.(κ) .+ η
     end;
     # Return alpha 
+    @debug "Completed forward step ..."
     return α
 end;
 
@@ -172,6 +158,7 @@ function backward_algorithm(Γ::Array{Float64}, Ψ::Array{Float64})::Array{Float
     :param Ψ: emission distribution probabilities.
     :return: matrix Β ∈ R^{T x m} with logged probabilities computed in the backward step
     =#
+    @debug "Computing backward step ...."
     # Shapes
     T = size(Ψ)[1] 
     M = size(Γ)[1]
@@ -193,12 +180,13 @@ function backward_algorithm(Γ::Array{Float64}, Ψ::Array{Float64})::Array{Float
         η += log(ω)
     end;
     # Return beta 
+    @debug "Completed backward step ..."
     return β
 end;
 
 # Baum-welch algorithm
 # Modified to reduce the chance of underflow errors.
-function baum_welch(Γ::Array{Float64}, X::Array{Float64}, μ::Array{Float64}, σ::Array{Float64}; iterations = 150, tol=1e-6)::Tuple{Array{Float64}, Array{Float64}, Array{Float64}, Float64, Float64, Float64}
+function baum_welch(Γ::Array{Float64}, X::Array{Float64}, μ::Array{Float64}, σ::Array{Float64}; iterations = 150, tol=1e-20)::Tuple{Array{Float64}, Array{Float64}, Array{Float64}, Float64, Float64, Float64}
     #=
     Use the Baum-Welch algorithm to estimate the TPM and the emission distribution parameters
     :param Γ: initial transition probabily matrix of size m x m, where m is the number of hidden states 
@@ -211,7 +199,7 @@ function baum_welch(Γ::Array{Float64}, X::Array{Float64}, μ::Array{Float64}, �
     M = size(Γ)[1]
     T = size(X)[1]
     # For each iteration, estimate parameters 
-    for n ∈ 1:iterations 
+    @showprogress "Fitting HMM ..." for n ∈ 1:iterations 
         # Compute the likelihood of the data given the parameters 
         #  Ψ ∈ R^{T, M}
         Ψ = normalized_pdf(X, μ, σ)
@@ -222,90 +210,64 @@ function baum_welch(Γ::Array{Float64}, X::Array{Float64}, μ::Array{Float64}, �
         s1 = α[T, :]
         s2 = s1[argmax(s1)]
         LL = s2 + log(sum(exp.(s1 .- s2)))
-        
-    end;
-end;
-
-# Forward algorithm
-function forward_algorithm_old(Γ::Array{Float64}, Ψ::Array{Float64}, δ::Array{Float64})::Array{Float64}
-    #=
-    Compute forward step of the forward-backward algorithm
-    :param X: observed data. Sequence of datapoints of length T (1 x T)
-    :param Γ: transition probabily matrix of size m x m, where m is the number of hidden states 
-    :param Ψ: emission distribution probabilities. In the case of gaussian emission distributions, this is:
-
-                p(X | Zk) = N(X | μk, Σk) ∀ k
-
-              We assume that we know these and that this matrix Ψ ∈ R^{m x T}
-
-    -- TODO: solve this later :param Ψ: emission distribution parameters. Matrix of size (m x n(θ)), where n(θ) equals the number of parameters.
-    :param δ: initial distribution matrix of size 1 x m
-    :return: matrix Α ∈ R^{T x m} with probabilities computed in the forward step
-    =#
-    # Initialize alpha
-    T = size(Ψ)[1]
-    M = size(Γ)[1]
-    Α = zeros((T, M))
-    # Populate first alpha (initial distribution)
-    Α[1, :] = δ .* Ψ[1, :]
-    # For each step in 2 : T, populate alpha 
-    for t ∈ 2:T
-        for m ∈ 1:M
-            Α[t, m] = (Α[t-1, :]' * Γ[:, m]) .* Ψ[t, m]
+        @debug "Log-likelihood of the forward-backward probabilities is $LL ..."
+        # For each state, compute next values 
+        Γ_next = zeros(size(Γ))
+        μ_next = zeros(size(μ))
+        σ_next = zeros(size(σ))
+        for i ∈ 1:M
+            for j ∈ 1:M
+                inside = @. α[1:(T-1), i] + Ψ[2:T,j] + β[2:T, j] - LL
+                Γ_next[i,j] = Γ[i,j] * sum(exp.(inside))
+            end;
+            # Update mean, sd 
+            p_i = @. exp(α[:,i] + β[:, i] - LL)
+            μ_next[i] = sum(p_i .* X) / sum(p_i)
+            X_centered = X .- μ_next[i]
+            σ_next[i] = sqrt((p_i .* X_centered)' * X_centered / sum(p_i))
+        end;
+        # Normalize new TPM 
+        Γ_next ./= sum(Γ_next, dims=1)'
+        # Compute measures of fit 
+        params = M*M+M-1
+        AIC = 2*(LL-params)
+        BIC = -2*LL*params*log(T)
+        # Compute stopping criterion 
+        # (sum of difference in parameter change)
+        ϵ = (abs.(μ.-μ_next) |> sum, abs.(σ.-σ_next) |> sum, abs.(Γ.-Γ_next) |> sum) |>
+            sum
+        @debug "Epsilon has value $ϵ ..."
+        # Set new parameters to old ones 
+        Γ = Γ_next 
+        μ = μ_next
+        σ = σ_next
+        # If less than tolerance, break 
+        if ϵ < tol
+            @debug "Stopping condition reached after $n iterations. Exiting now ..."
+            return Γ, μ, σ, LL, AIC, BIC
         end;
     end;
-    # return
-    return Α
-end;
-
-# Backward algorithm
-function backward_algorithm_old(Γ::Array{Float64}, Ψ::Array{Float64}, δ::Array{Float64})::Array{Float64}
-    #=
-    Compute the backward step of the forward-backward algorithm
-    :param X: observed data. Sequence of datapoints of length T (1 x T)
-    :param Γ: transition probabily matrix of size m x m, where m is the number of hidden states 
-    :param Ψ: emission distribution probabilities.
-    :return: matrix Β ∈ R^{T x m} with probabilities computed in the forward step
-    =#
-    # Initialize Β
-    T = size(Ψ)[1]
-    M = size(Γ)[1]
-    Β = zeros((T, M))
-    # Set B_T to 1
-    Β[T,:] = ones((1, M))
-    # Loop from T-1 to 1
-    for t ∈ reverse(1:(T-1))
-        for m ∈ 1:M
-            Β[t, m] = (Β[t+1, :] .* Ψ[t+1, m])' * Γ[m,:]
-        end;
-    end;
-    # Return 
-    return Β
-end;
-
-# Utility function that computes log-likelihood given x, mu, sigma and transition probability
-function log_likelihood(ψ::Float64, γ::Float64)::Float64
-    #= 
-    Compute the log-likelihood of X given the parameters 
-    =#
-    return log(ψ) + log(γ)
+    # Return best parameters and fit statistics
+    return Γ, μ, σ, LL, AIC, BIC
 end;
 
 # Viterbi algorithm
 # Used for decoding the most likely set of state sequences across T
-function viterbi_algorithm(Ψ::Array{Float64}, Γ::Array{Float64}, δ::Array{Float64})::Array{Int64}
+function viterbi_algorithm(Γ::Array{Float64}, Ψ::Array{Float64})::Array{Int64}
     #=
     Compute the maximizing latent state sequence
     =#
     # Dimensions 
     T = size(Ψ)[1]
     M = size(Γ)[1]
+    # Compute the initial distribution 
+    δ = (Matrix(I, M, M) .- Γ .+ 1) \ ones(M)
     # State sequences
     sequences = zeros(Int64, (T-1, M))
     # Viterbi probabilities 
     Ω = zeros((T, M))
     # First time step 
-    Ω[1,:] = [log_likelihood(Ψ[1,m], δ[m]) for m ∈ 1:M]
+    Ω[1,:] = [log(Ψ[1,m]) + log(δ[m]) for m ∈ 1:M]
     @debug "Forward pass (computing set of likely sequences) ...)"
     # Loop through time steps 
     for t ∈ 2:T
@@ -315,7 +277,7 @@ function viterbi_algorithm(Ψ::Array{Float64}, Γ::Array{Float64}, δ::Array{Flo
             # Compute for each state the probability of ending up at state m ...
             prob = zeros((M))
             for j ∈ 1:M
-                prob[j] = Ω[t-1, j] + log_likelihood(Ψ[t, m], Γ[j, m])
+                prob[j] = Ω[t-1, j] + log(Ψ[t, m]) + log(Γ[j, m])
             end;
             # Get argmax
             sequences[t-1, m] = argmax(prob)
@@ -333,147 +295,44 @@ function viterbi_algorithm(Ψ::Array{Float64}, Γ::Array{Float64}, δ::Array{Flo
     return states
 end;
 
-# Baum-Welch algorithm (EM estimation)
-function baum_welch(Γ::Array{Float64}, X::Array{Float64}, δ::Array{Float64}; iterations = 150)
-    #=
-    Perform EM estimation for the HMM parameters
-    =#
-    # Shapes 
-    M, _ = size(Γ)
-    T = size(X)[1]
-    # Initialize parameters 
-    # For each iteration 
-    for i ∈ 1:iterations
-        # Compute PDF on X 
-        Ψ = normalized_pdf(X, μ, σ)
-        # Compute forward & backward probabilities
-        α = forward_algorithm(Γ, Ψ, δ)
-        β = backward_algorithm(Γ, Ψ, δ)
-        # expectation step (latent variable optimization)
-        Λ = zeros((M, M, T-1))
-        for t ∈ 1:(T-1)
-            d = ((α[t, :]' * Γ) .* Ψ[t+1, :]) * β[t+1, :]'
-            for m ∈ 1:M
-                n = α[t, m] .* Γ[m, :] * Ψ[t+1,:]' .* β[t+1,:]
-                Λ[m, :, t] = n / d
-            end;
-        
-        end;
-    end;
-end;
-
-M = 2
-T = 40
-
-Γ = [0.3 0.7 ; 0.6 0.4]
-δ = [(1/2) ; (1/2)]
-μ = [-1.0 ; 4.0]
-σ = [1.3 ; 0.8]
-
-X, Z = simulate_HMM(M, T, Γ, δ, μ, σ);
-
-Γ = rand(Float64, (M,M))
-Γ ./ sum(Γ, dims=2)
-δ = rand(Float64, (M))
-δ ./ sum(δ)  
-μ = rand(Float64, (M))
-σ = ones(M)
-
 # Initialize parameters 
-#  .... TODO
-# For each iteration 
-iterations = 20
-for i ∈ 1:iterations 
-    @show μ
-    @show σ
-    @show Γ
-    @debug "Processing iteration $i ..."
-    # Compute PDF on X 
-    Ψ = normalized_pdf(X, μ, σ)
-    # Compute forward & backward probabilities
-    α = forward_algorithm(Γ, Ψ, δ)
-    β = backward_algorithm(Γ, Ψ, δ)
-    # expectation step (latent variable optimization)
-    Λ = zeros((M, M, T-1))
-    for t ∈ 1:(T-1)
-        # This is correct
-        d = (α[t,:]' * Γ .* Ψ[t+1, :]') * β[t+1, :]
-        for m ∈ 1:M
-            n = α[t, m] .* Γ[m, :] .* Ψ[t+1, :] .* β[t+1,:]
-            Λ[m, :, t] = n ./ d
-        end;
-    end;
-    # Take sum across columns in the tpm 
-    ζ = sum(Λ, dims=2) |>
-        x -> dropdims(x; dims=2)
-    # Update Gamma
-    Γ[:,:] = sum(Λ, dims=3) ./ sum(ζ, dims=2) |>
-        x -> dropdims(x; dims=3)[:,:]
-    # Add T'th dimensions
-    ζ = sum(Λ[:,:,T-2], dims=1) |>
-        x -> hcat(ζ, x')
-    # Compute mixing proportions
-    # (This is the same as in regular EM)
-    mp = sum(ζ, dims=2) ./ sum(ζ)
-    ζ_cs = sum(ζ, dims=2)
-    # Update mean / variance estimates 
-    for m ∈ 1:M
-        # Compute mean for cluster m 
-        μ_m = sum(ζ[m,:] .* X, dims=1)[1] / ζ_cs[m]
-        # Center X by mu_m
-        X_centered = X .- μ_m 
-        # Compute variance 
-        σ_m = (ζ[m,:] .* X_centered)' * X_centered ./ ζ_cs[m]
-        # Update parameters 
-        μ[m] = μ_m 
-        σ[m] = σ_m[1]
-    end;
-end;
-# Viterbi algorithm 
-v = viterbi_algorithm(normalized_pdf(X, μ, σ),
-                      Γ, δ)
-
-
-
-
-# This is supposed to be a 3 x 1 array (row m of the TPM at time t)
-for m ∈ 1:M
-    n = α[t, m] .* Γ[m, :] .* Ψ[t+1, :] .* β[t+1,:]
-    Λ[m, :, t] = n ./ d
+function initialize_parameters(M::Int64, T::Int64)::Tuple{Array{Float64},Array{Float64}, Array{Float64}}
+    #=
+    Initialize the TPM and parameters of the distributions
+    =#
+    # Gamma 
+    Γ = ones((M,M)) ./= M
+    μ = Uniform(0, 1) |>
+        x -> rand(x, M)
+    # Standard deviations
+    σ = ones((M))
+    # Return 
+    return Γ, μ, σ
 end;
 
-d = ((α[t, :]' * Γ) .* Ψ[t+1, :]') * β[t+1, :]
-m = 1
-n = α[t, m] .* Γ[m, :] .* Ψ[t+1,:]' .* β[t+1,:]
+# Generate dataset
+Random.seed!(425234);
+M = 2
+T = 500
+Γ = [0.8 0.2 ; 0.35 0.65]
+μ = [-2.0 ; 4.0]
+σ = [1.3 ; 0.8]
+X, Z = simulate_HMM(M, T, Γ, δ, μ, σ);
+# X is bimodal
+histogram(X, bins=15)
 
-α[t,:]' * Γ .* Ψ[t+1, :]'
+# Make initial parameters 
+Γ0, μ0, σ0 = initialize_parameters(M, T)
 
+# Fit HMM
+Γ1, μ1, σ1, LL, AIC, BIC = baum_welch(Γ0, X, μ0, σ0; iterations=100, tol=1e-6)
 
+# Predicted state sequence 
 Ψ = normalized_pdf(X, μ, σ)
+S = viterbi_algorithm(Γ, Ψ)
 
-forward_algorithm(X, Γ, Ψ, δ)
-backward_algorithm(X, Γ, Ψ, δ)
-
-states, LL = viterbi_algorithm(Ψ, Γ, δ);
-# Not all states correct
-sum(states .== Z)
-# Which ones?
-findall(x->x==1, states .!= Z)
-
-# Value of wrong state
-idx = 123
-# Value of observed 
-X[idx]
-# Value of latent 
-Z[idx]
-# Value of predicted latent 
-states[idx]
-# Value of probabilities for each state
-Ψ[idx, :]
-# Transition probability given previous state 
-states[idx-1]
-Γ[states[idx-1], :]
-Γ[states[idx-1], states[idx]]
+# Accuracy
+sum(Z .== S) / length(Z)
 
 ### End module
 end;
