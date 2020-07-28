@@ -319,7 +319,7 @@ function viterbi_algorithm(Γ::Array{Float64}, Ψ::Array{Float64})::Array{Int64}
     @debug "Forward pass (computing set of likely sequences) ...)"
     # Loop through time steps 
     for t ∈ 2:T
-        if t % 30 == 0
+        if t % 100 == 0
             @debug "Computing sequences at time step $t ..."
         end;
         # For each state, conditioning on the last state, do ...
@@ -356,9 +356,7 @@ function initialize_parameters(M::Int64)::Tuple{Array{Float64},Array{Float64}, A
         x -> sort(rand(x, M)) 
     @debug "μ initialized as $μ ..."
     # Standard deviations
-    #σ = ones((M))
-    σ = Uniform(.2, 2) |>
-        x -> rand(x, M) 
+    σ = ones((M))
     @debug "σ initialized as $σ ..."
     # Return 
     return Γ, μ, σ
@@ -414,71 +412,6 @@ function fit(X::Array{Float64}, M::Int64; epochs=3, iterations=100, tol=1e-6)
     # Return best parameters, fit statistics and the predicted sequences 
     return (Γ_best, μ_best, σ_best), (LL_best, AIC_best, BIC_best), S
 end;
-
-# Logger
-#io = open("log.txt", "w+")
-logger = global_logger(SimpleLogger(stdout, Logging.Debug)) # Change to Logging.Debug for detailed info
-#close(io)
-
-# Generate dataset
-#Random.seed!(425234);
-M = 3
-T = 800
-Γ = [0.7 0.12 0.18 ; 0.17 0.6 0.23 ; 0.32 0.38 0.3]
-μ = [-6.0 ; 0; 6]
-σ = [0.1 ; 2.0; 1.4]
-X, Z = simulate(M, T, Γ, μ, σ);
-# X is bimodal
-histogram(X, bins=15)
-
-# Fit HMM 
-θ, stats, S = fit(X, 2; epochs =3);
-θ[1]
-θ[2]
-θ[3]
-
-initialize_parameters(2)
-
-# Accuracy
-sum(Z .== S) / length(Z)
-
-# Forecasting 
-# (1) obtain forward probabilities 
-Ψ = normalized_pdf(X, θ[2:3]...) # ... is splat operator 
-# Compute the initial distribution 
-δ = (Matrix(I, M, M) .- θ[1] .+ 1) \ ones(M)
-α = δ .* Ψ[1,:]
-κ = sum(α)
-α /= κ
-for t ∈ 1:T
-    ω = (α' * θ[1])' .* Ψ[t,:]
-    α[:] = ω / sum(ω)
-end;
-# Make xrange based on means and variances
-support_low = Normal(min(θ[2]..., min(θ[3]...))) |>
-    x -> quantile(x, 0.001)
-support_high = Normal(max(θ[2]..., max(θ[3]...))) |>
-    x -> quantile(x, 0.999)
-# Make sequence 
-support = [i for i ∈ support_low:0.1:support_high]
-ΨH = normalized_pdf(support, θ[2:3]...)
-# Horizon
-H = 20
-Φ = zeros((H, M))
-λ = α
-# For each time step in Horizon, compute forward prob 
-for h ∈ 1:H
-    Φ[h,:] = (λ' * θ[1])' .* ΨH[h,:]
-    λ[:] = Φ[h,:];
-end;
-Λ = normalized_pdf(support, θ[2:3]...)
-out = (Λ * )
-
-histogram(Λ * Φ[1,:], bins=15)
-
-Λ * Φ[1,:]
-
-Λ
 
 ### End module
 end;
