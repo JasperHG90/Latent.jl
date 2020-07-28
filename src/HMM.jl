@@ -14,7 +14,6 @@ TODO: add forecasting function (p.246)
 
 using Random, Plots, Logging, LinearAlgebra, ProgressMeter, Distributions
 using Logging;
-logger = global_logger(SimpleLogger(stdout, Logging.Debug)) # Change to Logging.Debug for detailed info
 
 """
     simulate_HMM(M::Int64, T::Int64, Γ::Array{Float64}, δ::Array{Float64}, μ::Array{Float64}, σ::Array{Float64})::Tuple{Array{Float64}, Array{Float64}}
@@ -37,13 +36,15 @@ An array of dimensions (∑N x M) containing the data points.
 julia>
 ```
 """
-function simulate(M::Int64, T::Int64, Γ::Array{Float64}, δ::Array{Float64}, μ::Array{Float64}, σ::Array{Float64})::Tuple{Array{Float64}, Array{Int64}}
+function simulate(M::Int64, T::Int64, Γ::Array{Float64}, μ::Array{Float64}, σ::Array{Float64})::Tuple{Array{Float64}, Array{Int64}}
     # Assert dimensions 
     @assert M == size(σ)[1] "Number of variances not equal to the number of latent states ..."
     @assert M == size(μ)[1] "Number of means not equal to the number of latent states ..."
     @assert M == size(Γ)[1] == size(Γ)[2] "Transition probability matrix should be of dimensions M x M ..."
-    @assert M == size(δ)[1] "Initial transition probability array should be of dimensions M x 1"
+    #@assert M == size(δ)[1] "Initial transition probability array should be of dimensions M x 1"
     # TODO: TPM may not contain zero entries
+    # Compute the initial distribution 
+    δ = (Matrix(I, M, M) .- Γ .+ 1) \ ones(M)
     # Populate X and Z 
     X = zeros((T))
     Z = zeros(Int64, (T))
@@ -182,11 +183,75 @@ function backward_algorithm(Γ::Array{Float64}, Ψ::Array{Float64})::Array{Float
     return β
 end;
 
-# Baum-welch algorithm
-# Modified to reduce the chance of underflow errors.
-function baum_welch(Γ::Array{Float64}, X::Array{Float64}, μ::Array{Float64}, σ::Array{Float64}; iterations = 150, tol=1e-20)::Tuple{Array{Float64}, Array{Float64}, Array{Float64}, Float64, Float64, Float64}
+# Wrapper to compute forward-backward probabilities using maximum likelihood 
+function forward_backward_algorithm_EM(Γ::Array{Float64}, Ψ::Array{Float64})::Tuple{Array{Float64}, Array{Float64}}
     #=
-    Use the Baum-Welch algorithm to estimate the TPM and the emission distribution parameters
+    Compute forward-backward algorithm
+    =#
+    # Compute forward & backward probabilities 
+    α = forward_algorithm(Γ, Ψ)
+    β = backward_algorithm(Γ, Ψ)
+    # Return both 
+    return α, β
+end;
+
+# E-step (Baum-Welch algorithm)
+function baum_welch_E_step(α::Array{Float64}, β::Array{Float64}, Ψ::Array{Float64}, Γ::Array{Float64})::Tuple{Array{Float64}, Float64}
+    #= 
+    Compute the expectation step of the Baum-Welch algorithm.
+    =#
+    T = size(Ψ)[1]
+    M = size(Γ)[1]
+    # Compute log-likelihood 
+    s1 = α[T, :]
+    s2 = s1[argmax(s1)]
+    LL = s2 + log(sum(exp.(s1 .- s2)))
+    @debug "Log-likelihood of the forward-backward probabilities is $LL ..."
+    # For each state, compute next values 
+    Γ_next = zeros(size(Γ))
+    @debug "Size of Γ is $(size(Γ))"
+    @debug "E-step: number of states is $M ..."
+    for i ∈ 1:M
+        for j ∈ 1:M
+            inside = @. α[1:(T-1), i] + Ψ[2:T,j] + β[2:T, j] - LL
+            @debug "Computed unnormalized transition probabilities going from state $i to state $j ..."
+            Γ_next[i,j] = Γ[i,j] * sum(exp.(inside))
+        end;
+    end;
+    # Return gamma next 
+    return Γ_next, LL
+end;
+
+# M-step (Baum-Welch algorithm)
+function baum_welch_M_step(α::Array{Float64}, β::Array{Float64}, X::Array{Float64}, LL::Float64, M::Int64)
+    #=
+    perform the M-step of the Baum-Welch algorithm
+    =#
+    # Shapes 
+    T = size(X)[1]
+    # Allocate
+    μ_next = zeros((M))
+    σ_next = zeros((M))
+    @debug "M-step: Number of states M is $M ..."
+    for i ∈ 1:M
+        # Update mean, sd 
+        p_i = @. exp(α[:,i] + β[:, i] - LL)
+        @debug "Computed mixing proportion for state $i ..."
+        μ_next[i] = sum(p_i .* X) / sum(p_i)
+        @debug "Computed μ_$i ..."
+        X_centered = X .- μ_next[i]
+        σ_next[i] = sqrt((p_i .* X_centered)' * X_centered / sum(p_i))
+        @debug "Computed σ_$i ..."
+    end;
+    # Return parameters 
+    return μ_next, σ_next
+end;
+
+# Optimization of HMM parameters 
+# Modified to reduce the chance of underflow errors.
+function optim(Γ::Array{Float64}, X::Array{Float64}, μ::Array{Float64}, σ::Array{Float64}; iterations = 150, tol=1e-20)::Tuple{Array{Float64}, Array{Float64}, Array{Float64}, Float64, Float64, Float64}
+    #=
+    Optimize the HMM parameters to estimate the TPM and the emission distribution parameters
     :param Γ: initial transition probabily matrix of size m x m, where m is the number of hidden states 
     :param X: observed data. Sequence of datapoints of length T (T x 1).    
     :param μ: intial mean vector of length M x 1.
@@ -196,34 +261,18 @@ function baum_welch(Γ::Array{Float64}, X::Array{Float64}, μ::Array{Float64}, �
     # Get dimensions 
     M = size(Γ)[1]
     T = size(X)[1]
+    LL = AIC = BIC = NaN
     # For each iteration, estimate parameters 
-    @showprogress "Fitting HMM ..." for n ∈ 1:iterations 
+    for n ∈ 1:iterations 
         # Compute the likelihood of the data given the parameters 
         #  Ψ ∈ R^{T, M}
         Ψ = normalized_pdf(X, μ, σ)
-        # Compute forward & backward probabilities 
-        α = forward_algorithm(Γ, Ψ)
-        β = backward_algorithm(Γ, Ψ)
-        # Compute the log-likelihood of the data 
-        s1 = α[T, :]
-        s2 = s1[argmax(s1)]
-        LL = s2 + log(sum(exp.(s1 .- s2)))
-        @debug "Log-likelihood of the forward-backward probabilities is $LL ..."
-        # For each state, compute next values 
-        Γ_next = zeros(size(Γ))
-        μ_next = zeros(size(μ))
-        σ_next = zeros(size(σ))
-        for i ∈ 1:M
-            for j ∈ 1:M
-                inside = @. α[1:(T-1), i] + Ψ[2:T,j] + β[2:T, j] - LL
-                Γ_next[i,j] = Γ[i,j] * sum(exp.(inside))
-            end;
-            # Update mean, sd 
-            p_i = @. exp(α[:,i] + β[:, i] - LL)
-            μ_next[i] = sum(p_i .* X) / sum(p_i)
-            X_centered = X .- μ_next[i]
-            σ_next[i] = sqrt((p_i .* X_centered)' * X_centered / sum(p_i))
-        end;
+        # Get forward-backward probabilities
+        α, β = forward_backward_algorithm_EM(Γ, Ψ)
+        # Compute the E-step (Baum-Welch)
+        Γ_next, LL = baum_welch_E_step(α, β, Ψ, Γ)
+        # Compute the M-step (Baum-Welch)
+        μ_next, σ_next = baum_welch_M_step(α, β, X, LL, M)
         # Normalize new TPM 
         Γ_next ./= sum(Γ_next, dims=1)'
         # Compute measures of fit 
@@ -234,7 +283,7 @@ function baum_welch(Γ::Array{Float64}, X::Array{Float64}, μ::Array{Float64}, �
         # (sum of difference in parameter change)
         ϵ = (abs.(μ.-μ_next) |> sum, abs.(σ.-σ_next) |> sum, abs.(Γ.-Γ_next) |> sum) |>
             sum
-        @debug "Epsilon has value $ϵ ..."
+        @debug "Epsilon has value $ϵ on iteration $n with log-likelihood $LL..."
         # Set new parameters to old ones 
         Γ = Γ_next 
         μ = μ_next
@@ -245,6 +294,7 @@ function baum_welch(Γ::Array{Float64}, X::Array{Float64}, μ::Array{Float64}, �
             return Γ, μ, σ, LL, AIC, BIC
         end;
     end;
+    @debug "EM algorithm did not converge ..."
     # Return best parameters and fit statistics
     return Γ, μ, σ, LL, AIC, BIC
 end;
@@ -269,7 +319,9 @@ function viterbi_algorithm(Γ::Array{Float64}, Ψ::Array{Float64})::Array{Int64}
     @debug "Forward pass (computing set of likely sequences) ...)"
     # Loop through time steps 
     for t ∈ 2:T
-        @debug "Computing sequences at time step $t ..."
+        if t % 30 == 0
+            @debug "Computing sequences at time step $t ..."
+        end;
         # For each state, conditioning on the last state, do ...
         for m ∈ 1:M
             # Compute for each state the probability of ending up at state m ...
@@ -294,51 +346,98 @@ function viterbi_algorithm(Γ::Array{Float64}, Ψ::Array{Float64})::Array{Int64}
 end;
 
 # Initialize parameters 
-function initialize_parameters(M::Int64, T::Int64)::Tuple{Array{Float64},Array{Float64}, Array{Float64}}
+function initialize_parameters(M::Int64)::Tuple{Array{Float64},Array{Float64}, Array{Float64}}
     #=
     Initialize the TPM and parameters of the distributions
     =#
     # Gamma 
     Γ = ones((M,M)) ./= M
     μ = Uniform(0, 1) |>
-        x -> rand(x, M)
+        x -> sort(rand(x, M)) 
+    @debug "μ initialized as $μ ..."
     # Standard deviations
-    σ = ones((M))
+    #σ = ones((M))
+    σ = Uniform(.2, 2) |>
+        x -> rand(x, M) 
+    @debug "σ initialized as $σ ..."
     # Return 
     return Γ, μ, σ
 end;
 
 # HMM function
-function fit(X::Array{Float64}, M::Int64; iterations=100, tol=1e-6)
+function fit(X::Array{Float64}, M::Int64; epochs=3, iterations=100, tol=1e-6)
     #=
     Fit a Gaussian Hidden Markov Model to a dataset
     =#
+    # Assertions 
+    # M > 1
     # Get dimensions
     T = size(X)[1]
-    # Initialize parameters 
-    Γ0, μ0, σ0 = initialize_parameters(M, T) 
-    # Fit HMM
-    Γ1, μ1, σ1, LL, AIC, BIC = baum_welch(Γ0, X, μ0, σ0; iterations=iterations, tol=tol)
+    # Allocate 
+    Γ_best = zeros((M,M))
+    μ_best = zeros((M))
+    σ_best = zeros((M))
+    LL_best = NaN
+    AIC_best = NaN
+    BIC_best = NaN
+    # For each epoch 
+    @showprogress "Fitting HMM ..." for epoch ∈ 1:epochs
+        @debug "Fitting HMM on epoch $epoch ..."
+        # Initialize parameters 
+        Γ0, μ0, σ0 = initialize_parameters(M) 
+        # Fit HMM
+        Γ1, μ1, σ1, LL, AIC, BIC = optim(Γ0, X, μ0, σ0; iterations=iterations, tol=tol)
+        @debug "Log-likelihood is $LL ..."
+        # If loss is better, save
+        if epoch == 1
+            Γ_best[:] = Γ1[:]
+            μ_best[:] = μ1[:]
+            σ_best[:] = σ1[:]
+            LL_best = LL
+            AIC_best = AIC 
+            BIC_best = BIC
+        elseif LL > LL_best
+            @debug "Found log-likelihood $LL that improves on best log-likelihood $LL_best (improvement of $(((-1*LL)-(-1*LL_best)) / (-1*LL_best) |> x-> x*100 |> x->round(x, digits=5))%)..."
+            Γ_best[:] = Γ1[:]
+            μ_best[:] = μ1[:]
+            σ_best[:] = σ1[:]
+            LL_best = LL
+            AIC_best = AIC 
+            BIC_best = BIC
+        else 
+            continue
+        end;
+    end;
     # Predicted state sequence 
-    Ψ = normalized_pdf(X, μ1, σ1) # Likelihood given the best parameters
-    S = viterbi_algorithm(Γ1, Ψ)
+    Ψ = normalized_pdf(X, μ_best, σ_best) # Likelihood given the best parameters
+    S = viterbi_algorithm(Γ_best, Ψ)
     # Return best parameters, fit statistics and the predicted sequences 
-    return (Γ1, μ1, σ1), (LL, AIC, BIC), S
+    return (Γ_best, μ_best, σ_best), (LL_best, AIC_best, BIC_best), S
 end;
 
+# Logger
+#io = open("log.txt", "w+")
+logger = global_logger(SimpleLogger(stdout, Logging.Debug)) # Change to Logging.Debug for detailed info
+#close(io)
+
 # Generate dataset
-Random.seed!(425234);
-M = 2
-T = 500
-Γ = [0.8 0.2 ; 0.35 0.65]
-μ = [-2.0 ; 4.0]
-σ = [1.3 ; 0.8]
-X, Z = simulate(M, T, Γ, δ, μ, σ);
+#Random.seed!(425234);
+M = 3
+T = 800
+Γ = [0.7 0.12 0.18 ; 0.17 0.6 0.23 ; 0.32 0.38 0.3]
+μ = [-6.0 ; 0; 6]
+σ = [0.1 ; 2.0; 1.4]
+X, Z = simulate(M, T, Γ, μ, σ);
 # X is bimodal
 histogram(X, bins=15)
 
 # Fit HMM 
-θ, stats, S = fit(X, 2);
+θ, stats, S = fit(X, 2; epochs =3);
+θ[1]
+θ[2]
+θ[3]
+
+initialize_parameters(2)
 
 # Accuracy
 sum(Z .== S) / length(Z)
