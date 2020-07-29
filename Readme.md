@@ -106,7 +106,7 @@ We can now call the MCMC sampler:
 history = Latent.BGMM.gibbs_sampler(X, K, α0, κ0, Τ0, ν0, Ψ0; iterations=5000);
 ```
 
-We can now inspect the trace plots:
+We can plot the trace plots as follows:
 
 ```julia
 # Specify burn-in samples
@@ -118,19 +118,6 @@ burnin = 2000
 μ_h = history[1];
 μ_h1 = reshape(μ_h[1,:,:,:],(size(μ_h)[2], size(μ_h)[3] * size(μ_h)[4])) # Chain 1 
 μ_h2 = reshape(μ_h[2,:,:,:],(size(μ_h)[2], size(μ_h)[3] * size(μ_h)[4])) # Chain 2
-```
-
-```julia
-julia> mapslices(mean, μ_h1, dims=[1])
-1×6 Array{Float64,2}:
- 7.92874  9.28638  1.62668  10.7877  -0.535033  4.00717
-
-julia> mapslices(mean, μ_h2, dims=[1])
-1×6 Array{Float64,2}:
- 8.01656  9.36826  -0.588281  3.94625  1.64997  10.7903
-```
-
-```julia
 # Trace plots
 plot(μ_h1, alpha=0.8, title="Trace plot (means)")
 plot!(μ_h2, alpha=0.5)
