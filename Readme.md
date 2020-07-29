@@ -1,8 +1,8 @@
 # Latent.jl
 
-Latent.jl is a julia package that contains a variety of latent variable models. These models use either Expectation-Maximization or MCMC sampling.
+Latent.jl is a julia package that contains a variety of latent variable models. These models use either Expectation-Maximization or MCMC sampling or a mixture of both.
 
-It currently contains an implementation of a Gaussian Mixture Model (GMM) used to cluster continuous data. A future version of the package will also contain an implementation of a Hidden Markov Model (HMM) by means of full posterior sampling.
+It currently contains an implementation of a Gaussian Mixture Model (GMM) used to cluster continuous data. It also contains an implementation of a time-homogenous and stationary Hidden Markov Model (HMM) for continuous univariate data.
 
 ## Installation
 
@@ -15,7 +15,7 @@ You can install the package through Julia's package manager:
 
 ## Examples
 
-### Gaussian Mixture Model (GMM)
+### Gaussian Mixture Model (GMM) using EM-estimation
 
 The GMM clusters continuous data by decomposing a mixture of clusters into separate multivariate Gaussian distributions.
 
@@ -35,7 +35,7 @@ Random.seed!(5236);
 
 K = 3
 N = [100 90 35];
-μ = [1.8 11.; 9.0 10.2 ; -.3 4.];
+μ = [1.8 9.0 -.3; 11.0 10.2 4.0];
 Σ = cat([5. .6; .6 3.2], [4.2 3; 3 3.6], [3 2.2 ; 2.2 3], dims=K);
 
 # Simulate dataset 
@@ -47,14 +47,13 @@ plot(X[:,1], X[:,2], group=lbls, seriestype = :scatter, title = "GMM with 3 clus
 
 <img src="img/sim.png" width=500></img>
 
-To cluster the data using a GMM, we simply call `clust`:
+To cluster the data using a GMM, we call `clust`:
 
 ```julia
 # Number of clusters we think are in our dataset
 K = 3;
-
 # Retrieve labels and optim history
-lblsp, history = Latent.GMM.clust(X, K; maxiter = 200, epochs = 150);
+params, lblsp, history = Latent.GMM.clust(X, K; maxiter = 200, epochs = 150);
 ```
 
 The `clust` function runs the EM algorithm several times (in this case 150 times). We can plot the loss for each of these epochs as follows:
@@ -67,5 +66,10 @@ Latent.GMM.plot_history(history)
 <img src="img/history.png" width=500></img>
 
 We can also plot the clusters:
+
+```julia
+# Plot clusters
+plot(X[:,1], X[:,2], group=lblsp, seriestype = :scatter, title = "GMM with 3 clusters (estimated)")
+```
 
 <img src="img/estimated.png" width=500></img>

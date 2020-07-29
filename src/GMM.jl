@@ -434,9 +434,9 @@ function simulate(K::Int64, N::Array{Int64}, μ::Array{Float64}, Σ::Array{Float
     # Assert dimensions 
     @assert K == size(Σ)[3] "You must pass a covariance matrix for each separate cluster ..."
     @assert K == size(μ)[2] "You must pass a mean array for each separate cluster ..."
-    @assert K == size(N)[1] "You must pass a sample size (N) for each separate cluster ..."
+    @assert K == size(N)[2] "You must pass a sample size (N) for each separate cluster ..."
     # Assert that dim(μ) and dim(Σ) are equal in the number of columns 
-    @assert size(Σ)[2] == size(μ)[2]
+    @assert size(Σ)[2] == size(μ)[1]
     # Dimensions 
     N_total = sum(N)
     M = size(Σ)[1]

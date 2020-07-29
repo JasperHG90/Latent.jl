@@ -9,7 +9,7 @@ using Random, Logging, LinearAlgebra, ProgressMeter, Distributions, Plots, MCMCC
 logger = global_logger(SimpleLogger(stdout, Logging.Info)) # Change to Logging.Debug for detailed info
 
 # Sample means from multivariate normal distribution
-function sample_posterior_mean(X, κ0, Τ0, Γ, Σ)
+function sample_posterior_mean(X::Array{Float64}, κ0::Array{Float64}, Τ0::Array{Float64}, Γ::Array{Float64}, Σ::Array{Float64})::Array{Float64}
     #=
     Compute the posterior means for a multivariate normal distribution 
     :param X: input data of shape (N x M). 
@@ -61,7 +61,7 @@ function sample_posterior_mean(X, κ0, Τ0, Γ, Σ)
 end;
 
 # Sample posterior covariance matrices from an inverse-wishart distribution 
-function sample_posterior_covariance(X, ν0, Ψ0, Γ, μ)
+function sample_posterior_covariance(X::Array{Float64}, ν0::Array{Int64}, Ψ0::Array{Float64}, Γ::Array{Int64}, μ::Array{Float64})::Array{Float64}
     #=
     Sample a covariance matrix given a known mean μ
     :param X: input data of shape (N x M).
@@ -103,7 +103,7 @@ function sample_posterior_covariance(X, ν0, Ψ0, Γ, μ)
 end;
 
 # Assign to clusters
-function cluster_assignments(X, ζ, μ, Σ)
+function cluster_assignments(X::Array{Float64}, ζ::Array{Float64}, μ::Array{Float64}, Σ::Array{Float64})::Array{Int64}
     #=
     Sample cluster assignments for each point in X 
     :param X: input data of shape (N x M). 
@@ -141,7 +141,7 @@ function cluster_assignments(X, ζ, μ, Σ)
 end;
 
 # Sample mixing proportions from dirichlet
-function sample_mixing_proportions(Γ, α0, K)
+function sample_mixing_proportions(Γ::Array{Float64}, α0::Array{Float64}, K::Int64)::Array{Float64}
     #=
     Sample mixing proportions from a dirichlet distribution 
     :param Γ:
@@ -164,7 +164,7 @@ function sample_mixing_proportions(Γ, α0, K)
 end;
 
 # Initialize parameters 
-function initialize_parameters(N, M, K; ϵ = 0.1)
+function initialize_parameters(N::Int64, M::Int64, K::Int64; ϵ = 0.1)::Tuple{Array{Float64}, Array{Float64}, Array{Float64}, Array{Int64}}
     #= 
     Initialize parameters 
     =#
@@ -193,7 +193,7 @@ function initialize_parameters(N, M, K; ϵ = 0.1)
 end;
 
 # Gibbs sampling routine 
-function gibbs_sampler(X, K, α0, κ0, Τ0, ν0, Ψ0; iterations = 2000, burnin = 1000)
+function gibbs_sampler(X::Array{Float64}, K::Int64, α0::Array{Float64}, κ0::Array{Float64}, Τ0::Array{Float64}, ν0::Array{Float64}, Ψ0::Array{Float64}; iterations = 2000, burnin = 1000)::Tuple{Array{Float64}, Array{Float64}, Array{Float64}}
     #= 
     Gibbs sampling routine for GMM 
     =#
