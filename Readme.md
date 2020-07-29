@@ -39,7 +39,7 @@ N = [100 90 35];
 Σ = cat([5. .6; .6 3.2], [4.2 3; 3 3.6], [3 2.2 ; 2.2 3], dims=K);
 
 # Simulate dataset 
-X, lbls = Latent.GMM.simulate_GMM(K, N, μ, Σ);
+X, lbls = Latent.GMM.simulate(K, N, μ, Σ);
 
 # Plot
 plot(X[:,1], X[:,2], group=lbls, seriestype = :scatter, title = "GMM with 3 clusters")

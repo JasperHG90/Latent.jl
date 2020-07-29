@@ -8,65 +8,6 @@ module BGMM
 using Random, Logging, LinearAlgebra, ProgressMeter, Distributions, Plots, MCMCChains, StatsPlots
 logger = global_logger(SimpleLogger(stdout, Logging.Info)) # Change to Logging.Debug for detailed info
 
-"""
-    simulate_gmm(K::Int64, N::Int64, μ::Array{Float64}, Σ::Array{Float64})::Tuple{Array{Float64}, Array{Float64}}
-
-Simulate a dataset that is a mixture of K multivariate Gaussians
-
-# Arguments 
-- `K::Int64`: Number of clusters 
-- `N::Array{Int64}`: Array of dimensions (1 x K) containing the number of data points for each cluster.
-- `μ::Array{Float64}`: Array of dimensions (K x M) containing the M means for each cluster.
-- `Σ::Array{Float64}`: Array of dimensions (M x M X K) containing the K M X M (co)variances. These matrices must be symmetric and positive semi-definite.
-
-# Returns 
-An array of dimensions (∑N x M) containing the data points.
-
-# Examples
-```julia-repl
-julia>
-```
-"""
-function simulate(K::Int64, N::Array{Int64}, μ::Array{Float64}, Σ::Array{Float64})::Tuple{Array{Float64}, Array{Float64}}
-    # Assert dimensions 
-    @assert K == size(Σ)[3] "You must pass a covariance matrix for each separate cluster ..."
-    @assert K == size(μ)[1] "You must pass a mean array for each separate cluster ..."
-    @assert K == size(N)[1] "You must pass a sample size (N) for each separate cluster ..."
-    # Assert that dim(μ) and dim(Σ) are equal in the number of columns 
-    @assert size(Σ)[2] == size(μ)[2]
-    # Dimensions 
-    N_total = sum(N)
-    M = size(Σ)[1]
-    # Open up result matrix 
-    X = zeros((N_total, M))
-    lbls = zeros((N_total,1))
-    # For each cluster, generate data 
-    start_idx = 1
-    for k ∈ 1:K
-        # Dims 
-        N_k = N[k]
-        μ_k = μ[:,k]
-        Σ_k = Σ[:,:,k]
-        # Create end idx 
-        end_idx = k == 1 ? N_k : start_idx + N_k - 1
-        # Draw points 
-        X[start_idx:end_idx, :] = MvNormal(μ_k, Σ_k) |> 
-            x -> rand(x, N_k)';
-        # Labels 
-        lbls[start_idx:end_idx, :] = fill(k, N_k)
-        # Overwrite start values 
-        if k < K
-            start_idx = N_k + start_idx
-        end;
-    end;
-    # Cat X and labels
-    Xtmp = hcat(X, lbls);
-    # Shuffle
-    Xtmp = Xtmp[shuffle(1:end), :];
-    # Return X and labels 
-    return Xtmp[:, 1:M], Xtmp[:, end]
-end;
-
 # Sample means from multivariate normal distribution
 function sample_posterior_mean(X, κ0, Τ0, Γ, Σ)
     #=
@@ -223,7 +164,7 @@ function sample_mixing_proportions(Γ, α0, K)
 end;
 
 # Initialize parameters 
-function initialize_parameters(N, M, K)
+function initialize_parameters(N, M, K; ϵ = 0.1)
     #= 
     Initialize parameters 
     =#
@@ -233,7 +174,8 @@ function initialize_parameters(N, M, K)
     ζ = zeros((K))
     for k ∈ 1:K
         ζ[k] = k < K ? Uniform(.1, .9 - sum(ζ)) |> rand : 1 - sum(ζ)
-        Σ[:,:,k] = Matrix(I, M, M)
+        A = rand(Float64, (M,M))
+        Σ[:,:,k] = ϵ * I + A' * A
     end;
     # Shuffle zeta 
     shuffle!(ζ)
@@ -293,61 +235,6 @@ function gibbs_sampler(X, K, α0, κ0, Τ0, ν0, Ψ0; iterations = 2000, burnin 
     # Return
     return μ_history, Σ_history, ζ_history
 end;
-
-Nt = 1000
-K = 2
-N = Nt .* [0.3, .7] |> x -> convert.(Int64, x);
-μ = [-3.5 1.0; 3.0 2.0];
-Σ = cat([1.5 -.2; -.2 1.5], [2.0 1.0 ; 1.0 2.0], dims=3);
-ζ = [0.3, 0.7]
-# Simulate dataset 
-Random.seed!(1);
-X, Z = simulate(K, N, μ, Σ);
-
-Γ = convert.(Int64, Z)
-plot(X[:,1], X[:,2], group=Z, seriestype = :scatter, title = "GMM with 2 clusters")
-
-# Hyperpriors
-κ0 = zeros((size(X)[2], K))
-Τ0 = zeros((M, M, K))
-Τ0[:,:,1] = [1 0; 0 1] ;Τ0[:,:,2] = [1 0; 0 1]
-ν0 = ones((K)) .+ 1
-Ψ0 = Τ0
-α0 = [1, 1]
-ζ = [0.3, 0.7]
-Σ = Τ0
-
-# Run the algorithm
-history = gibbs_sampler(X, K, α0, κ0, Τ0, ν0, Ψ0; iterations=8000);
-
-# Burn-in samples 
-burnin = 4000
-# Get means 
-μ_h = history[1]
-μ_h = reshape(μ_h, (size(μ_h)[1], size(μ_h)[2] * size(μ_h)[3]))
-
-# To MCMC chain 
-chn = Chains(μ_h[burnin:end, :])
-
-# visualize the MCMC simulation results
-p1 = plot(chn)
-p2 = plot(chn, colordim = :parameter)
-
-# Get proportions 
-ζ_h = Chains(history[3][burnin:end,:])
-
-# visualize the MCMC simulation results
-p1 = plot(ζ_h)
-p2 = plot(ζ_h, colordim = :parameter)
-
-sh = reshape(history[2], (size(history[1])[1], 2*2*2))
-ch = Chains(sh)
-
-# Compare to ML estimation 
-include("src/GMM.jl")
-params, lblsp, history = Main.GMM.clust(X, K; maxiter = 200, epochs = 150);
-params[3]
-
 
 ### End module
 end;
