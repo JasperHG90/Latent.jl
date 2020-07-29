@@ -131,7 +131,7 @@ julia> mapslices(mean, μ_h2, dims=[1])
 ```
 
 ```julia
-# Plot clusters
+# Trace plots
 plot(μ_h1, alpha=0.8, title="Trace plot (means)")
 plot!(μ_h2, alpha=0.5)
 ```
@@ -161,3 +161,73 @@ plot(X[:,1], X[:,2], group=clstrs, seriestype = :scatter, title = "GMM with 3 cl
 <img src="img/estimated_bayesian.png" width=500></img>
 
 Compared to EM estimation, Bayesian inference may seem like a chore. However, it offers many benefits in that Bayesian methods can update their parameters by using Bayesian updating. Bayesian inference also automatically yields [uncertainty estimates](https://en.wikipedia.org/wiki/Credible_interval) that are easier to interpret than their Frequentist counterparts.
+
+### Hidden Markov Model (HMM)
+
+This library currently contains an implementation of an HMM for univariate Gaussian emission distributions. 
+
+We can simulate some data using the following function:
+
+```julia
+# Set seed
+Random.seed!(425234);
+# Number of hidden states
+M = 3
+# Sequence length
+T = 800
+# Transition probabilities
+Γ = [0.7 0.12 0.18 ; 0.17 0.6 0.23 ; 0.32 0.38 0.3]
+# component distribution means
+μ = [-6.0 ; 0; 6]
+# Component distribution variances
+σ = [0.1 ; 2.0; 1.4]
+# Simulate data
+X, Z = Latent.HMM.simulate(M, T, Γ, μ, σ);
+```
+
+From the histogram below, we see that the data is multimodal. 
+
+```julia
+histogram(X, bins=20)
+```
+
+<img src="img/HMM_simulated.png" width=500></img>
+
+We can fit the HMM as follows:
+
+```julia
+# Fit HMM
+θ, stats, S = Latent.HMM.fit(X, M; epochs =3);
+# View parameters
+θ[1]
+θ[2]
+θ[3]
+```
+
+```julia
+julia> θ[1]
+3×3 Array{Float64,2}:
+ 0.672852  0.120804  0.200405
+ 0.233165  0.535989  0.23532
+ 0.332107  0.38422   0.289379
+
+julia> θ[2]
+3-element Array{Float64,1}:
+ -6.000510239439516
+  0.18597721602692183
+  5.996999220639854
+
+julia> θ[3]
+3-element Array{Float64,1}:
+ 0.097743419737968
+ 2.0935618423151405
+ 1.473874383048123
+```
+
+```julia
+# Plot state-switching
+plot(S)
+```
+
+<img src="img/HMM_state_switching.png" width=500></img>
+
