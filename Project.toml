@@ -1,7 +1,7 @@
 name = "Latent"
 uuid = "011f0329-33a3-4991-800d-0bc7a3b6219f"
 authors = ["Jasper Ginn <jasperginn@gmail.com>"]
-version = "0.1.3"
+version = "0.1.4"
 
 [deps]
 Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"

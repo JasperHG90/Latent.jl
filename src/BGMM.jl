@@ -174,7 +174,7 @@ function initialize_parameters(N::Int64, M::Int64, K::Int64; ϵ = 0.1)::Tuple{Ar
     # Initialize mixing proportions 
     ζ = zeros((K))
     for k ∈ 1:K
-        ζ[k] = k < K ? Uniform(.1, .9 - sum(ζ)) |> rand : 1 - sum(ζ)
+        ζ[k] = k < K ? Uniform(0.0, 1 - sum(ζ)) |> rand : 1 - sum(ζ)
         A = rand(Float64, (M,M))
         Σ[:,:,k] = ϵ * I + A' * A
     end;

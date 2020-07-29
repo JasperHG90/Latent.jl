@@ -83,6 +83,7 @@ Using the same generated data as we did in the previous example, we first need t
 ```julia
 ## Hyperpriors
 using LinearAlgebra
+using Distributions
 N, M = size(X)
 # Prior means 
 κ0 = zeros((size(X)[2], K))
