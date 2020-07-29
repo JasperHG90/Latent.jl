@@ -1,10 +1,11 @@
 #=
 Bayesian Gaussian Mixture Model
+# TODO: hierarchical priors
 =#
 
 module BGMM
 
-using Random, Logging, LinearAlgebra, ProgressMeter, Distributions, Plots
+using Random, Logging, LinearAlgebra, ProgressMeter, Distributions, Plots, MCMCChains, StatsPlots
 logger = global_logger(SimpleLogger(stdout, Logging.Info)) # Change to Logging.Debug for detailed info
 
 """
@@ -278,12 +279,12 @@ function gibbs_sampler(X, K, α0, κ0, Τ0, ν0, Ψ0; iterations = 2000, burnin 
         @debug "μ at iteration $i is $μ ..."
         # Sample new mixing proportions 
         ζ = sample_mixing_proportions(Γ, α0, K)
-        # Obtain cluster assignments
-        Γ = cluster_assignments(X, ζ, μ, Σ)
         # Sample means 
         μ = sample_posterior_mean(X, κ0, Τ0, Γ, Σ)
         # Sample covariances
         Σ = sample_posterior_covariance(X, ν0, Ψ0, Γ, μ)
+        # Obtain cluster assignments
+        Γ = cluster_assignments(X, ζ, μ, Σ)
         # Store 
         μ_history[i, :, :] = μ
         Σ_history[i, :, :, :] = Σ 
@@ -296,7 +297,7 @@ end;
 Nt = 1000
 K = 2
 N = Nt .* [0.3, .7] |> x -> convert.(Int64, x);
-μ = [-3.5 1.0; 6.0 3.0];
+μ = [-3.5 1.0; 3.0 2.0];
 Σ = cat([1.5 -.2; -.2 1.5], [2.0 1.0 ; 1.0 2.0], dims=3);
 ζ = [0.3, 0.7]
 # Simulate dataset 
@@ -317,17 +318,36 @@ plot(X[:,1], X[:,2], group=Z, seriestype = :scatter, title = "GMM with 2 cluster
 Σ = Τ0
 
 # Run the algorithm
-history = gibbs_sampler(X, K, α0, κ0, Τ0, ν0, Ψ0; iterations=2000);
+history = gibbs_sampler(X, K, α0, κ0, Τ0, ν0, Ψ0; iterations=8000);
 
-μ_history = history[1]
-μ_history = reshape(μ_history, (size(μ_history)[1], size(μ_history)[2] * size(μ_history)[3]))
-plot(μ_history[:,1:2])
-plot(μ_history[:,3:4])
+# Burn-in samples 
+burnin = 4000
+# Get means 
+μ_h = history[1]
+μ_h = reshape(μ_h, (size(μ_h)[1], size(μ_h)[2] * size(μ_h)[3]))
 
-Σ_history = history[2]
-Σ_history = Σ_history[1,:,:,:]
+# To MCMC chain 
+chn = Chains(μ_h[burnin:end, :])
 
-history[1][2000,:,:]
+# visualize the MCMC simulation results
+p1 = plot(chn)
+p2 = plot(chn, colordim = :parameter)
+
+# Get proportions 
+ζ_h = Chains(history[3][burnin:end,:])
+
+# visualize the MCMC simulation results
+p1 = plot(ζ_h)
+p2 = plot(ζ_h, colordim = :parameter)
+
+sh = reshape(history[2], (size(history[1])[1], 2*2*2))
+ch = Chains(sh)
+
+# Compare to ML estimation 
+include("src/GMM.jl")
+params, lblsp, history = Main.GMM.clust(X, K; maxiter = 200, epochs = 150);
+params[3]
+
 
 ### End module
 end;

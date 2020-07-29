@@ -385,7 +385,7 @@ A tuple containing
 
 ```
 """
-function clust(X::Array{Float64}, K::Int64; ϵ::Float64=1e-3, maxiter::Int64=100, epochs::Int64=10)::Tuple{Array{Float64}, Array{Float64}}
+function clust(X::Array{Float64}, K::Int64; ϵ::Float64=1e-3, maxiter::Int64=100, epochs::Int64=10)::Tuple{Tuple{Array{Float64}, Array{Float64}, Array{Float64}, Float64},Array{Float64}, Array{Float64}}
     # Record dimensions
     N, M = size(X)
     # Run algorithm
@@ -393,7 +393,7 @@ function clust(X::Array{Float64}, K::Int64; ϵ::Float64=1e-3, maxiter::Int64=100
     # Compute labels using best values 
     lbls = [i for i in mapslices(argmax, E_step(X, π1, μ1, Σ1), dims=2)[:]]
     # Return history and labels
-    return lbls, history
+    return (π1, μ1, Σ1, L1), lbls, history
 end;
 
 function plot_history(history::Array{Float64})
