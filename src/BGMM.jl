@@ -205,7 +205,8 @@ function gibbs_sampler(X::Array{Float64}, K::Int64, α0::Array{Int64}, κ0::Arra
     ζ_history = zeros((chains, iterations, K));
     Γ_history = zeros(Int64, (chains, iterations, N));
     # For each iteration, run the sampler
-    @showprogress "Sampling ..." for c in 1:chains
+    for c in 1:chains
+        println("Sampling chain $c/$chains ...")
         # Initial values
         μ, Σ, ζ, Γ = initialize_parameters(N, M, K);
         # Store initial values 
@@ -213,7 +214,7 @@ function gibbs_sampler(X::Array{Float64}, K::Int64, α0::Array{Int64}, κ0::Arra
         Σ_history[c, 1, :, :, :] = Σ;
         ζ_history[c, 1, :] = ζ;
         # Sample for each iteration
-        for i ∈ 2:iterations
+        @showprogress "Sampling ..." for i ∈ 2:iterations
             @debug "μ at iteration $i is $μ ..."
             # Sample new mixing proportions 
             ζ = sample_mixing_proportions(Γ, α0, K)
