@@ -1,15 +1,16 @@
 #=
 Bayesian Gaussian Mixture Model
 # TODO: hierarchical priors
+# TODO: bayesian updating
 =#
 
 module BGMM
 
-using Random, Logging, LinearAlgebra, ProgressMeter, Distributions, Plots, MCMCChains, StatsPlots
+using Random, Logging, LinearAlgebra, ProgressMeter, Distributions, Plots
 logger = global_logger(SimpleLogger(stdout, Logging.Info)) # Change to Logging.Debug for detailed info
 
 # Sample means from multivariate normal distribution
-function sample_posterior_mean(X::Array{Float64}, κ0::Array{Float64}, Τ0::Array{Float64}, Γ::Array{Float64}, Σ::Array{Float64})::Array{Float64}
+function sample_posterior_mean(X::Array{Float64}, κ0::Array{Float64}, Τ0::Array{Float64}, Γ::Array{Int64}, Σ::Array{Float64})::Array{Float64}
     #=
     Compute the posterior means for a multivariate normal distribution 
     :param X: input data of shape (N x M). 
@@ -141,7 +142,7 @@ function cluster_assignments(X::Array{Float64}, ζ::Array{Float64}, μ::Array{Fl
 end;
 
 # Sample mixing proportions from dirichlet
-function sample_mixing_proportions(Γ::Array{Float64}, α0::Array{Float64}, K::Int64)::Array{Float64}
+function sample_mixing_proportions(Γ::Array{Int64}, α0::Array{Int64}, K::Int64)::Array{Float64}
     #=
     Sample mixing proportions from a dirichlet distribution 
     :param Γ:
@@ -193,44 +194,40 @@ function initialize_parameters(N::Int64, M::Int64, K::Int64; ϵ = 0.1)::Tuple{Ar
 end;
 
 # Gibbs sampling routine 
-function gibbs_sampler(X::Array{Float64}, K::Int64, α0::Array{Float64}, κ0::Array{Float64}, Τ0::Array{Float64}, ν0::Array{Float64}, Ψ0::Array{Float64}; iterations = 2000, burnin = 1000)::Tuple{Array{Float64}, Array{Float64}, Array{Float64}}
+function gibbs_sampler(X::Array{Float64}, K::Int64, α0::Array{Int64}, κ0::Array{Float64}, Τ0::Array{Float64}, ν0::Array{Int64}, Ψ0::Array{Float64}; iterations = 2000, chains = 2, burnin = 1000)::Tuple{Array{Float64}, Array{Float64}, Array{Float64}}
     #= 
     Gibbs sampling routine for GMM 
     =#
     N, M = size(X);
-    # Initialize parameters 
-    #μ = rand(Float64, (M, K))
-    #ζ = [0.5 ; 0.5]
-    #Γ = wsample(1:K, ζ, N)
-    #Σ = zeros((M, M, K))
-    #for k ∈ 1:K
-    #    Σ[:,:,k] = Matrix(I, M, M)
-    #end;
-    μ, Σ, ζ, Γ = initialize_parameters(N, M, K);
     # Bookkeeping
-    μ_history = zeros((iterations, M, K));
-    Σ_history = zeros((iterations, M, M, K));
-    ζ_history = zeros((iterations, K));
-    Γ_history = zeros(Int64, (iterations, N));
-    # Store initial values 
-    μ_history[1, :, :] = μ;
-    Σ_history[1, :, :, :] = Σ;
-    ζ_history[1, :] = ζ;
+    μ_history = zeros((chains, iterations, M, K));
+    Σ_history = zeros((chains, iterations, M, M, K));
+    ζ_history = zeros((chains, iterations, K));
+    Γ_history = zeros(Int64, (chains, iterations, N));
     # For each iteration, run the sampler
-    @showprogress "Sampling ..." for i ∈ 2:iterations
-        @debug "μ at iteration $i is $μ ..."
-        # Sample new mixing proportions 
-        ζ = sample_mixing_proportions(Γ, α0, K)
-        # Sample means 
-        μ = sample_posterior_mean(X, κ0, Τ0, Γ, Σ)
-        # Sample covariances
-        Σ = sample_posterior_covariance(X, ν0, Ψ0, Γ, μ)
-        # Obtain cluster assignments
-        Γ = cluster_assignments(X, ζ, μ, Σ)
-        # Store 
-        μ_history[i, :, :] = μ
-        Σ_history[i, :, :, :] = Σ 
-        ζ_history[i, :] = ζ
+    @showprogress "Sampling ..." for c in 1:chains
+        # Initial values
+        μ, Σ, ζ, Γ = initialize_parameters(N, M, K);
+        # Store initial values 
+        μ_history[c, 1, :, :] = μ;
+        Σ_history[c, 1, :, :, :] = Σ;
+        ζ_history[c, 1, :] = ζ;
+        # Sample for each iteration
+        for i ∈ 2:iterations
+            @debug "μ at iteration $i is $μ ..."
+            # Sample new mixing proportions 
+            ζ = sample_mixing_proportions(Γ, α0, K)
+            # Sample means 
+            μ = sample_posterior_mean(X, κ0, Τ0, Γ, Σ)
+            # Sample covariances
+            Σ = sample_posterior_covariance(X, ν0, Ψ0, Γ, μ)
+            # Obtain cluster assignments
+            Γ = cluster_assignments(X, ζ, μ, Σ)
+            # Store 
+            μ_history[c, i, :, :] = μ
+            Σ_history[c, i, :, :, :] = Σ 
+            ζ_history[c, i, :] = ζ
+        end;
     end;
     # Return
     return μ_history, Σ_history, ζ_history
