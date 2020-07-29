@@ -30,7 +30,7 @@ function simulate(K::Int64, N::Array{Int64}, μ::Array{Float64}, Σ::Array{Float
     # Assert dimensions 
     @assert K == size(Σ)[3] "You must pass a covariance matrix for each separate cluster ..."
     @assert K == size(μ)[1] "You must pass a mean array for each separate cluster ..."
-    @assert K == size(N)[2] "You must pass a sample size (N) for each separate cluster ..."
+    @assert K == size(N)[1] "You must pass a sample size (N) for each separate cluster ..."
     # Assert that dim(μ) and dim(Σ) are equal in the number of columns 
     @assert size(Σ)[2] == size(μ)[2]
     # Dimensions 
@@ -44,7 +44,7 @@ function simulate(K::Int64, N::Array{Int64}, μ::Array{Float64}, Σ::Array{Float
     for k ∈ 1:K
         # Dims 
         N_k = N[k]
-        μ_k = μ[k,:]
+        μ_k = μ[:,k]
         Σ_k = Σ[:,:,k]
         # Create end idx 
         end_idx = k == 1 ? N_k : start_idx + N_k - 1
@@ -108,7 +108,7 @@ function sample_posterior_mean(X, κ0, Τ0, Γ, Σ)
             Hermitian |> 
             Matrix
         # Solve for posterior mean 
-        κ1 = Τ1 * (Τ0_inv * κ0[:,k] + Nk .* Σ_inv * ϵ)
+        κ1 = Τ1 * (Τ0_inv * κ0[:,k] .+ Nk .* Σ_inv * ϵ)
         @debug "Posterior means κ1: $κ1 ; Posterior covariance matrix Τ1: $Τ1 ..."
         # Sample means from multivariate normal 
         μ_ret[:, k] = MvNormal(κ1, Τ1) |>
@@ -146,9 +146,9 @@ function sample_posterior_covariance(X, ν0, Ψ0, Γ, μ)
         # Compute posterior hyperparameters 
         ν1 = Nk + ν0[k]
         # Subtract group mean from observations in cluster K
-        X_k = zeros(size(X[Γ.==k,:]))
+        X_k = X[Γ .== k, :]
         for m ∈ 1:M
-            X_k[:,m] = X[Γ.==k,m] .- μ[m,k]
+            X_k[:,m] = X_k[:,m] .- μ[m,k]
         end;
         # Compute posterior sums of squares 
         Ψ1 = Ψ0[:,:,k] .+ X_k' * X_k
@@ -160,8 +160,8 @@ function sample_posterior_covariance(X, ν0, Ψ0, Γ, μ)
     return Σ_out
 end;
 
-# Sample cluster assignments Γ from a multinomial 
-function sample_cluster_assignments(X, ζ, μ, Σ)
+# Assign to clusters
+function cluster_assignments(X, ζ, μ, Σ)
     #=
     Sample cluster assignments for each point in X 
     :param X: input data of shape (N x M). 
@@ -183,14 +183,19 @@ function sample_cluster_assignments(X, ζ, μ, Σ)
     # Normalize (to turn into probabilities)
     Ω ./= sum(Ω, dims=2)
     # Sample cluster assignment for each row 
-    Γ1 = zeros(Int64,(N))
+    #Γ1 = zeros(Int64,(N))
+    Γ2 = zeros(Int64,(N))
     for n ∈ 1:N
-        Γ1[n] = Multinomial(1, Ω[n,:]) |>
-            x -> rand(x, 1) |>
-            x -> argmax(x)[1]
+        Γ2[n] = argmax(Ω[n,:])
+        #Γ1[n] = wsample(1:K, Ω[n,:], 1)[1]
     end;
-    # Return cluster assignments 
-    return Γ1
+    #pdiff = sum(Γ1 .!= Γ2) / N
+    #@info "Cluster assignments: agreement is $(1-pdiff) ..."
+    # Return cluster assignments
+    # SOmething really weird happens here 
+    # When using ML, the estimation is super. But when using 
+    # sampling, it is consistently off by 10%.
+    Γ2
 end;
 
 # Sample mixing proportions from dirichlet
@@ -207,7 +212,7 @@ function sample_mixing_proportions(Γ, α0, K)
     N = zeros((K))
     # Sample size by cluster
     for k ∈ 1:K
-        N[k] = length(Γ.==k)
+        N[k] = length(Γ[Γ.==k])
     end;
     # Sample from dirichlet 
     ζ1 = Dirichlet(N .+ α0) |> 
@@ -215,30 +220,6 @@ function sample_mixing_proportions(Γ, α0, K)
     # Return 
     return ζ1
 end;
-
-K = 3
-N = [100 90 35];
-μ = [1.8 11.; 9.0 10.2 ; -.3 4.];
-Σ = cat([5. .6; .6 3.2], [4.2 3; 3 3.6], [3 2.2 ; 2.2 3], dims=K);
-
-# Simulate dataset 
-X, Z = simulate(K, N, μ, Σ);
-
-
-
-M = size(X)[2]
-
-Γ = Z;
-κ0 = zeros((size(X)[2], K))
-EY = Matrix(I, M, M)
-Τ0 = zeros((M, M, K))
-Τ0[:,:,1] = EY ;Τ0[:,:,2] = EY;Τ0[:,:,3] = EY
-
-ν0 = ones((K)) .+ 1
-Ψ0 = Τ0 .+ 10
-α0 = [1, 1, 1]
-ζ = [0.3, 0.3, 0.4]
-Σ = Τ0
 
 # Initialize parameters 
 function initialize_parameters(N, M, K)
@@ -275,6 +256,13 @@ function gibbs_sampler(X, K, α0, κ0, Τ0, ν0, Ψ0; iterations = 2000, burnin 
     =#
     N, M = size(X);
     # Initialize parameters 
+    #μ = rand(Float64, (M, K))
+    #ζ = [0.5 ; 0.5]
+    #Γ = wsample(1:K, ζ, N)
+    #Σ = zeros((M, M, K))
+    #for k ∈ 1:K
+    #    Σ[:,:,k] = Matrix(I, M, M)
+    #end;
     μ, Σ, ζ, Γ = initialize_parameters(N, M, K);
     # Bookkeeping
     μ_history = zeros((iterations, M, K));
@@ -285,36 +273,61 @@ function gibbs_sampler(X, K, α0, κ0, Τ0, ν0, Ψ0; iterations = 2000, burnin 
     μ_history[1, :, :] = μ;
     Σ_history[1, :, :, :] = Σ;
     ζ_history[1, :] = ζ;
-    Γ_history[1, :] = Γ;
     # For each iteration, run the sampler
-    for i ∈ 2:iterations
+    @showprogress "Sampling ..." for i ∈ 2:iterations
         @debug "μ at iteration $i is $μ ..."
         # Sample new mixing proportions 
-        ζ_next = sample_mixing_proportions(Γ, α0, K)
+        ζ = sample_mixing_proportions(Γ, α0, K)
+        # Obtain cluster assignments
+        Γ = cluster_assignments(X, ζ, μ, Σ)
         # Sample means 
-        μ_next = sample_posterior_mean(X, κ0, Τ0, Γ, Σ)
+        μ = sample_posterior_mean(X, κ0, Τ0, Γ, Σ)
         # Sample covariances
-        Σ_next = sample_posterior_covariance(X, ν0, Ψ0, Γ, μ)
-        # Sample cluster assignments
-        Γ_next = sample_cluster_assignments(X, ζ, μ, Σ)
+        Σ = sample_posterior_covariance(X, ν0, Ψ0, Γ, μ)
         # Store 
-        μ_history[i, :, :] = μ_next
-        Σ_history[i, :, :, :] = Σ_next
-        ζ_history[i, :] = ζ_next
-        Γ_history[i, :] = Γ_next
-        # Assign new values 
-        ζ[:] = ζ_next[:]
-        μ[:,:] = μ_next[:,:]
-        Σ[:,:,:] = Σ_next[:,:,:]
-        Γ[:,:] = Γ_next[:,:]
+        μ_history[i, :, :] = μ
+        Σ_history[i, :, :, :] = Σ 
+        ζ_history[i, :] = ζ
     end;
     # Return
-    return μ_history, Σ_history, ζ_history, Γ_history
+    return μ_history, Σ_history, ζ_history
 end;
 
+Nt = 1000
+K = 2
+N = Nt .* [0.3, .7] |> x -> convert.(Int64, x);
+μ = [-3.5 1.0; 6.0 3.0];
+Σ = cat([1.5 -.2; -.2 1.5], [2.0 1.0 ; 1.0 2.0], dims=3);
+ζ = [0.3, 0.7]
+# Simulate dataset 
+Random.seed!(1);
+X, Z = simulate(K, N, μ, Σ);
+
+Γ = convert.(Int64, Z)
+plot(X[:,1], X[:,2], group=Z, seriestype = :scatter, title = "GMM with 2 clusters")
+
+# Hyperpriors
+κ0 = zeros((size(X)[2], K))
+Τ0 = zeros((M, M, K))
+Τ0[:,:,1] = [1 0; 0 1] ;Τ0[:,:,2] = [1 0; 0 1]
+ν0 = ones((K)) .+ 1
+Ψ0 = Τ0
+α0 = [1, 1]
+ζ = [0.3, 0.7]
+Σ = Τ0
+
+# Run the algorithm
 history = gibbs_sampler(X, K, α0, κ0, Τ0, ν0, Ψ0; iterations=2000);
 
-plot(history[1][:,1,1])
+μ_history = history[1]
+μ_history = reshape(μ_history, (size(μ_history)[1], size(μ_history)[2] * size(μ_history)[3]))
+plot(μ_history[:,1:2])
+plot(μ_history[:,3:4])
+
+Σ_history = history[2]
+Σ_history = Σ_history[1,:,:,:]
+
+history[1][2000,:,:]
 
 ### End module
 end;
