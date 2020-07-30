@@ -385,7 +385,7 @@ A tuple containing
 
 ```
 """
-function clust(X::Array{Float64}, K::Int64; ϵ::Float64=1e-3, maxiter::Int64=100, epochs::Int64=10)::Tuple{Array{Float64}, Array{Float64}}
+function clust(X::Array{Float64}, K::Int64; ϵ::Float64=1e-3, maxiter::Int64=100, epochs::Int64=10)::Tuple{Tuple{Array{Float64}, Array{Float64}, Array{Float64}, Float64},Array{Float64}, Array{Float64}}
     # Record dimensions
     N, M = size(X)
     # Run algorithm
@@ -393,7 +393,7 @@ function clust(X::Array{Float64}, K::Int64; ϵ::Float64=1e-3, maxiter::Int64=100
     # Compute labels using best values 
     lbls = [i for i in mapslices(argmax, E_step(X, π1, μ1, Σ1), dims=2)[:]]
     # Return history and labels
-    return lbls, history
+    return (π1, μ1, Σ1, L1), lbls, history
 end;
 
 function plot_history(history::Array{Float64})
@@ -430,13 +430,13 @@ An array of dimensions (∑N x M) containing the data points.
 julia>
 ```
 """
-function simulate_GMM(K::Int64, N::Array{Int64}, μ::Array{Float64}, Σ::Array{Float64})::Tuple{Array{Float64}, Array{Float64}}
+function simulate(K::Int64, N::Array{Int64}, μ::Array{Float64}, Σ::Array{Float64})::Tuple{Array{Float64}, Array{Float64}}
     # Assert dimensions 
     @assert K == size(Σ)[3] "You must pass a covariance matrix for each separate cluster ..."
-    @assert K == size(μ)[1] "You must pass a mean array for each separate cluster ..."
+    @assert K == size(μ)[2] "You must pass a mean array for each separate cluster ..."
     @assert K == size(N)[2] "You must pass a sample size (N) for each separate cluster ..."
     # Assert that dim(μ) and dim(Σ) are equal in the number of columns 
-    @assert size(Σ)[2] == size(μ)[2]
+    @assert size(Σ)[2] == size(μ)[1]
     # Dimensions 
     N_total = sum(N)
     M = size(Σ)[1]
@@ -448,7 +448,7 @@ function simulate_GMM(K::Int64, N::Array{Int64}, μ::Array{Float64}, Σ::Array{F
     for k ∈ 1:K
         # Dims 
         N_k = N[k]
-        μ_k = μ[k,:]
+        μ_k = μ[:,k]
         Σ_k = Σ[:,:,k]
         # Create end idx 
         end_idx = k == 1 ? N_k : start_idx + N_k - 1
